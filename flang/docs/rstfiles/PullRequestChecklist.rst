@@ -2,7 +2,7 @@
 
 .. raw:: html
 
-   <!--===- documentation/PullRequestChecklist.md 
+   <!--===- documentation/PullRequestChecklist.rst 
 
       Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
       See https://llvm.org/LICENSE.txt for license information.
@@ -41,7 +41,7 @@ can also be used when reviewing pull requests.
 Follow the style guide
 ----------------------
 
-The following items are taken from the `C++ style guide <C++style.md>`_.  But
+The following items are taken from the `C++ style guide <C++style.rst>`_.  But
 even though I've read the style guide, they regularly trip me up.
 
 
@@ -50,11 +50,11 @@ even though I've read the style guide, they regularly trip me up.
   clang-format will do this for most code.  But you may need to break up long
   strings.
 * Review declarations for proper use of ``constexpr`` and ``const``.
-* Follow the C++ `naming guidelines <C++style.md#naming>`_.
+* Follow the C++ `naming guidelines <C++style.rst#naming>`_.
 * Ensure that the names evoke their purpose and are consistent with existing code.
 * Used braced initializers.
 * Review pointer and reference types to make sure that you're using them
-  appropriately.  Note that the `C++ style guide <C++style.md>`_ contains a
+  appropriately.  Note that the `C++ style guide <C++style.rst>`_ contains a
   section that describes all of the pointer types along with their
   characteristics.
 * Declare non-member functions ``static`` when possible.  Prefer

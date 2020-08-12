@@ -1,5 +1,5 @@
 
-<!--===- documentation/ImplementingASemanticCheck.md 
+<!--===- documentation/ImplementingASemanticCheck.rst 
 
    Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
    See https://llvm.org/LICENSE.txt for license information.
@@ -14,7 +14,7 @@ I recently added a semantic check to the f18 compiler front end.  This document
 describes my thought process and the resulting implementation.
 
 For more information about the compiler, start with the 
-`compiler overview <Overview.md>`_.
+`compiler overview <Overview.rst>`_.
 
 Problem definition
 ==================

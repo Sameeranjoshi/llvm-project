@@ -2,7 +2,7 @@
 
 .. raw:: html
 
-   <!--===- documentation/Overview.md 
+   <!--===- documentation/Overview.rst 
 
       Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
       See https://llvm.org/LICENSE.txt for license information.
@@ -20,7 +20,7 @@ Each phase produces either correct output or fatal errors.
 Prescan and Preprocess
 ----------------------
 
-See: `Preprocessing.md <Preprocessing.md>`_.
+See: `Preprocessing.rst <Preprocessing.rst>`_.
 
 **Input:** Fortran source and header files, command line macro definitions,
   set of enabled compiler directives (to be treated as directives rather than
@@ -47,7 +47,7 @@ Parse
 
 **Output:** A parse tree representing a syntactically correct program,
   rooted at a ``parser::Program``.
-  See: `Parsing.md <Parsing.md>`_ and `ParserCombinators.md <ParserCombinators.md>`_.
+  See: `Parsing.rst <Parsing.rst>`_ and `ParserCombinators.rst <ParserCombinators.rst>`_.
 
 **Entry point:** ``parser::Parsing::Parse``
 
@@ -64,7 +64,7 @@ Validate Labels and Canonicalize Do Statements
 
 **Output:** The parse tree with label constraints and construct names checked,
   and each ``LabelDoStmt`` converted to a ``NonLabelDoStmt``.
-  See: `LabelResolution.md <LabelResolution.md>`_.
+  See: `LabelResolution.rst <LabelResolution.rst>`_.
 
 **Entry points:** ``semantics::ValidateLabels``\ , ``parser::CanonicalizeDo``
 
@@ -104,7 +104,7 @@ Write Module Files
 
 **Output:** For each module and submodule, a ``.mod`` file containing a minimal
   Fortran representation suitable for compiling program units that depend on it.
-  See `ModFiles.md <ModFiles.md>`_.
+  See `ModFiles.rst <ModFiles.rst>`_.
 
 Analyze Expressions and Assignments
 -----------------------------------
@@ -122,4 +122,4 @@ Produce the Intermediate Representation
 **Input:** Parse tree with names and labels resolved.
 
 **Output:** An intermediate representation of the executable program.
-  See `FortranIR.md <FortranIR.md>`_.
+  See `FortranIR.rst <FortranIR.rst>`_.

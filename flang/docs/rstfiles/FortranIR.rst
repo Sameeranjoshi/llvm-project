@@ -5,7 +5,7 @@
 
 .. raw:: html
 
-   <!--===- documentation/FortranIR.md 
+   <!--===- documentation/FortranIR.rst 
 
       Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
       See https://llvm.org/LICENSE.txt for license information.
@@ -28,7 +28,7 @@ FIR will be an explicit, operational, and strongly-typed representation, which s
 Requirements
 ------------
 
-White Paper: `Control Flow Graph <ControlFlowGraph.md>`_\ :raw-html-m2r:`<sup>1</sup>`
+White Paper: `Control Flow Graph <ControlFlowGraph.rst>`_\ :raw-html-m2r:`<sup>1</sup>`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This is a list of requirements extracted from that document, which will be referred to as CFG-WP.
