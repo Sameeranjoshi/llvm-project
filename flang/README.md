@@ -8,7 +8,7 @@ F18 was subsequently accepted into the LLVM project and rechristened as Flang.
 
 ## Getting Started
 
-Read more about flang in the [documentation directory](documentation).
+Read more about flang in the [docs directory](docs).
 Start with the [compiler overview](docs/Overview.md).
 
 To better understand Fortran as a language
