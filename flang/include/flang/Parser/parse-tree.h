@@ -3639,8 +3639,9 @@ WRAPPER_CLASS(
 // ATOMIC READ
 struct OmpAtomicRead {
   TUPLE_CLASS_BOILERPLATE(OmpAtomicRead);
-  std::tuple<OmpAtomicMemoryOrderClauseList, Verbatim,
-      OmpAtomicMemoryOrderClausePostList, Statement<AssignmentStmt>,
+  CharBlock source;
+  std::tuple<OmpClauseList, Verbatim,
+      OmpClauseList, Statement<AssignmentStmt>,
       std::optional<OmpEndAtomic>>
       t;
 };
@@ -3648,8 +3649,8 @@ struct OmpAtomicRead {
 // ATOMIC WRITE
 struct OmpAtomicWrite {
   TUPLE_CLASS_BOILERPLATE(OmpAtomicWrite);
-  std::tuple<OmpAtomicMemoryOrderClauseList, Verbatim,
-      OmpAtomicMemoryOrderClausePostList, Statement<AssignmentStmt>,
+  std::tuple<OmpClauseList, Verbatim,
+      OmpClauseList, Statement<AssignmentStmt>,
       std::optional<OmpEndAtomic>>
       t;
 };
@@ -3657,8 +3658,8 @@ struct OmpAtomicWrite {
 // ATOMIC UPDATE
 struct OmpAtomicUpdate {
   TUPLE_CLASS_BOILERPLATE(OmpAtomicUpdate);
-  std::tuple<OmpAtomicMemoryOrderClauseList, Verbatim,
-      OmpAtomicMemoryOrderClausePostList, Statement<AssignmentStmt>,
+  std::tuple<OmpClauseList, Verbatim,
+      OmpClauseList, Statement<AssignmentStmt>,
       std::optional<OmpEndAtomic>>
       t;
 };
@@ -3668,15 +3669,15 @@ struct OmpAtomicCapture {
   TUPLE_CLASS_BOILERPLATE(OmpAtomicCapture);
   WRAPPER_CLASS(Stmt1, Statement<AssignmentStmt>);
   WRAPPER_CLASS(Stmt2, Statement<AssignmentStmt>);
-  std::tuple<OmpAtomicMemoryOrderClauseList, Verbatim,
-      OmpAtomicMemoryOrderClausePostList, Stmt1, Stmt2, OmpEndAtomic>
+  std::tuple<OmpClauseList, Verbatim,
+      OmpClauseList, Stmt1, Stmt2, OmpEndAtomic>
       t;
 };
 
 // ATOMIC
 struct OmpAtomic {
   TUPLE_CLASS_BOILERPLATE(OmpAtomic);
-  std::tuple<Verbatim, OmpAtomicMemoryOrderClauseList,
+  std::tuple<Verbatim, OmpClauseList,
       Statement<AssignmentStmt>, std::optional<OmpEndAtomic>>
       t;
 };

@@ -152,8 +152,18 @@ TYPE_PARSER(construct<OmpAlignedClause>(
 TYPE_PARSER(
     construct<OmpObject>(designator) || construct<OmpObject>("/" >> name / "/"))
 
+TYPE_PARSER(construct<OmpHintExpr>(parenthesized(constantExpr)))
+
 TYPE_PARSER("ALIGNED" >>
         construct<OmpClause>(parenthesized(Parser<OmpAlignedClause>{})) ||
+
+    "SEQ_CST" >> construct<OmpClause>(construct<OmpClause::SeqCst>()) ||
+    "ACQ_REL" >> construct<OmpClause>(construct<OmpClause::AcqRel>()) ||
+    "RELEASE" >> construct<OmpClause>(construct<OmpClause::Release>()) ||
+    "ACQUIRE" >> construct<OmpClause>(construct<OmpClause::Acquire>()) ||
+    "RELAXED" >> construct<OmpClause>(construct<OmpClause::Relaxed>()) ||
+    "HINT" >> construct<OmpClause>(Parser<OmpHintExpr>{}) ||
+
     "COLLAPSE" >> construct<OmpClause>(construct<OmpClause::Collapse>(
                       parenthesized(scalarIntConstantExpr))) ||
     "COPYIN" >> construct<OmpClause>(construct<OmpClause::Copyin>(
@@ -385,7 +395,7 @@ TYPE_PARSER(construct<OmpReductionCombiner>(Parser<AssignmentStmt>{}) ||
                 parenthesized(optionalList(actualArgSpec))))))
 
 // Hint Expression => HINT(hint-expression)
-TYPE_PARSER("HINT" >> construct<OmpHintExpr>(parenthesized(constantExpr)))
+//TYPE_PARSER("HINT" >> construct<OmpHintExpr>(parenthesized(constantExpr)))
 
 // 2.17.7 atomic -> ATOMIC [clause [,]] atomic-clause [[,] clause] |
 //                  ATOMIC [clause]
@@ -419,39 +429,39 @@ TYPE_PARSER(construct<OmpAtomicMemoryOrderClausePostList>(
 // OMP ATOMIC [MEMORY-ORDER-CLAUSE-LIST] READ [MEMORY-ORDER-CLAUSE-LIST]
 TYPE_PARSER("ATOMIC" >>
     construct<OmpAtomicRead>(
-        Parser<OmpAtomicMemoryOrderClauseList>{} / maybe(","_tok),
+        Parser<OmpClauseList>{} / maybe(","_tok),
         verbatim("READ"_tok),
-        Parser<OmpAtomicMemoryOrderClausePostList>{} / endOmpLine,
+        Parser<OmpClauseList>{} / endOmpLine,
         statement(assignmentStmt), maybe(Parser<OmpEndAtomic>{} / endOmpLine)))
 
 // OMP ATOMIC [MEMORY-ORDER-CLAUSE-LIST] CAPTURE [MEMORY-ORDER-CLAUSE-LIST]
 TYPE_PARSER(
     "ATOMIC" >> construct<OmpAtomicCapture>(
-                    Parser<OmpAtomicMemoryOrderClauseList>{} / maybe(","_tok),
+        	    Parser<OmpClauseList>{} / maybe(","_tok),
                     verbatim("CAPTURE"_tok),
-                    Parser<OmpAtomicMemoryOrderClausePostList>{} / endOmpLine,
+        	    Parser<OmpClauseList>{} / endOmpLine,
                     statement(assignmentStmt), statement(assignmentStmt),
                     Parser<OmpEndAtomic>{} / endOmpLine))
 
 // OMP ATOMIC [MEMORY-ORDER-CLAUSE-LIST] UPDATE [MEMORY-ORDER-CLAUSE-LIST]
 TYPE_PARSER("ATOMIC" >>
     construct<OmpAtomicUpdate>(
-        Parser<OmpAtomicMemoryOrderClauseList>{} / maybe(","_tok),
+        Parser<OmpClauseList>{} / maybe(","_tok),
         verbatim("UPDATE"_tok),
-        Parser<OmpAtomicMemoryOrderClausePostList>{} / endOmpLine,
+      	Parser<OmpClauseList>{} / endOmpLine,
         statement(assignmentStmt), maybe(Parser<OmpEndAtomic>{} / endOmpLine)))
 
 // OMP ATOMIC [MEMORY-ORDER-CLAUSE-LIST]
 TYPE_PARSER(construct<OmpAtomic>(verbatim("ATOMIC"_tok),
-    Parser<OmpAtomicMemoryOrderClauseList>{} / endOmpLine,
+    Parser<OmpClauseList>{} / endOmpLine,
     statement(assignmentStmt), maybe(Parser<OmpEndAtomic>{} / endOmpLine)))
 
 // OMP ATOMIC [MEMORY-ORDER-CLAUSE-LIST] WRITE [MEMORY-ORDER-CLAUSE-LIST]
 TYPE_PARSER("ATOMIC" >>
     construct<OmpAtomicWrite>(
-        Parser<OmpAtomicMemoryOrderClauseList>{} / maybe(","_tok),
+        Parser<OmpClauseList>{} / maybe(","_tok),
         verbatim("WRITE"_tok),
-        Parser<OmpAtomicMemoryOrderClausePostList>{} / endOmpLine,
+      	Parser<OmpClauseList>{} / endOmpLine,
         statement(assignmentStmt), maybe(Parser<OmpEndAtomic>{} / endOmpLine)))
 
 // Atomic Construct
@@ -547,3 +557,4 @@ TYPE_PARSER(
 TYPE_PARSER(construct<OpenMPLoopConstruct>(
     Parser<OmpBeginLoopDirective>{} / endOmpLine))
 } // namespace Fortran::parser
+
