@@ -152,7 +152,7 @@ TYPE_PARSER(construct<OmpAlignedClause>(
 TYPE_PARSER(
     construct<OmpObject>(designator) || construct<OmpObject>("/" >> name / "/"))
 
-TYPE_PARSER(construct<OmpHintExpr>(parenthesized(constantExpr)))
+//TYPE_PARSER(construct<OmpHintExpr>(parenthesized(constantExpr)))
 
 TYPE_PARSER("ALIGNED" >>
         construct<OmpClause>(parenthesized(Parser<OmpAlignedClause>{})) ||
@@ -162,7 +162,7 @@ TYPE_PARSER("ALIGNED" >>
     "RELEASE" >> construct<OmpClause>(construct<OmpClause::Release>()) ||
     "ACQUIRE" >> construct<OmpClause>(construct<OmpClause::Acquire>()) ||
     "RELAXED" >> construct<OmpClause>(construct<OmpClause::Relaxed>()) ||
-    "HINT" >> construct<OmpClause>(Parser<OmpHintExpr>{}) ||
+    "HINT" >>    construct<OmpClause>(parenthesized(constantExpr)) ||
 
     "COLLAPSE" >> construct<OmpClause>(construct<OmpClause::Collapse>(
                       parenthesized(scalarIntConstantExpr))) ||
@@ -477,7 +477,7 @@ TYPE_PARSER(startOmpLine >>
         verbatim("END CRITICAL"_tok), maybe(parenthesized(name)))) /
         endOmpLine)
 TYPE_PARSER(sourced(construct<OmpCriticalDirective>(verbatim("CRITICAL"_tok),
-                maybe(parenthesized(name)), maybe(Parser<OmpHintExpr>{}))) /
+                maybe(parenthesized(name)), maybe(Parser<OmpClauseList>{}))) /
     endOmpLine)
 
 TYPE_PARSER(construct<OpenMPCriticalConstruct>(

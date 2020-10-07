@@ -3598,7 +3598,7 @@ WRAPPER_CLASS(OmpHintExpr, ConstantExpr);
 struct OmpCriticalDirective {
   TUPLE_CLASS_BOILERPLATE(OmpCriticalDirective);
   CharBlock source;
-  std::tuple<Verbatim, std::optional<Name>, std::optional<OmpHintExpr>> t;
+  std::tuple<Verbatim, std::optional<Name>, std::optional<OmpClauseList>> t;
 };
 struct OmpEndCriticalDirective {
   TUPLE_CLASS_BOILERPLATE(OmpEndCriticalDirective);
