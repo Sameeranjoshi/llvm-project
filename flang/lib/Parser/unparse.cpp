@@ -2420,19 +2420,7 @@ public:
     EndOpenMP();
   }
   void Unparse(const OmpFlushMemoryClause &x) {
-    switch (x.v) {
-    case llvm::omp::Clause::OMPC_acq_rel:
-      Word("ACQ_REL ");
-      break;
-    case llvm::omp::Clause::OMPC_release:
-      Word("RELEASE ");
-      break;
-    case llvm::omp::Clause::OMPC_acquire:
-      Word("ACQUIRE ");
-      break;
-    default:
-      break;
-    }
+    Walk(x.v);
   }
   void Unparse(const OpenMPFlushConstruct &x) {
     BeginOpenMP();

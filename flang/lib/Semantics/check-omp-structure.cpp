@@ -208,7 +208,16 @@ void OmpStructureChecker::Enter(const parser::OpenMPFlushConstruct &x) {
   PushContextAndClauseSets(dir.source, llvm::omp::Directive::OMPD_flush);
 }
 
-void OmpStructureChecker::Leave(const parser::OpenMPFlushConstruct &) {
+void OmpStructureChecker::Leave(const parser::OpenMPFlushConstruct &x) {
+  if (FindClause(llvm::omp::Clause::OMPC_acquire) ||
+      FindClause(llvm::omp::Clause::OMPC_release) ||
+      FindClause(llvm::omp::Clause::OMPC_acq_rel)) {
+    if (const auto &flushList{
+            std::get<std::optional<parser::OmpObjectList>>(x.t)}) {
+      context_.Say(parser::FindSourceLocation(flushList),
+          "If memory-order-clause is RELEASE, ACQUIRE, or ACQ_REL, list items must not be specified on the FLUSH directive"_err_en_US);
+    }
+  }
   dirContext_.pop_back();
 }
 
@@ -372,6 +381,12 @@ void OmpStructureChecker::Enter(const parser::OmpClause &x) {
 
 // Following clauses do not have a seperate node in parse-tree.h.
 // They fall under 'struct OmpClause' in parse-tree.h.
+CHECK_SIMPLE_CLAUSE(AcqRel, OMPC_acq_rel)
+CHECK_SIMPLE_CLAUSE(Acquire, OMPC_acquire)
+CHECK_SIMPLE_CLAUSE(SeqCst, OMPC_seq_cst)
+CHECK_SIMPLE_CLAUSE(Release, OMPC_release)
+CHECK_SIMPLE_CLAUSE(Relaxed, OMPC_relaxed)
+
 CHECK_SIMPLE_CLAUSE(Copyin, OMPC_copyin)
 CHECK_SIMPLE_CLAUSE(Copyprivate, OMPC_copyprivate)
 CHECK_SIMPLE_CLAUSE(Device, OMPC_device)

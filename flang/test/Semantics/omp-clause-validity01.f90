@@ -491,6 +491,7 @@ use omp_lib
   !$omp flush acq_rel
   !$omp flush release
   !$omp flush acquire
+  !ERROR: If memory-order-clause is RELEASE, ACQUIRE, or ACQ_REL, list items must not be specified on the FLUSH directive
   !$omp flush release (c)
   !$omp cancel DO
   !$omp cancellation point parallel

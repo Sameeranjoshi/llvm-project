@@ -3702,7 +3702,7 @@ struct OpenMPCancelConstruct {
 //                        release
 //                        acquire
 struct OmpFlushMemoryClause {
-  WRAPPER_CLASS_BOILERPLATE(OmpFlushMemoryClause, llvm::omp::Clause);
+  WRAPPER_CLASS_BOILERPLATE(OmpFlushMemoryClause, OmpClause);
   CharBlock source;
 };
 

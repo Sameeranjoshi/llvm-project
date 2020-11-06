@@ -306,10 +306,8 @@ TYPE_PARSER(sourced(construct<OpenMPCancelConstruct>(verbatim("CANCEL"_tok),
 //        memory-order-clause -> acq_rel
 //                               release
 //                               acquire
-TYPE_PARSER(sourced(construct<OmpFlushMemoryClause>(
-    "ACQ_REL" >> pure(llvm::omp::Clause::OMPC_acq_rel) ||
-    "RELEASE" >> pure(llvm::omp::Clause::OMPC_release) ||
-    "ACQUIRE" >> pure(llvm::omp::Clause::OMPC_acquire))))
+TYPE_PARSER(
+    sourced(construct<OmpFlushMemoryClause>(sourced(Parser<OmpClause>{}))))
 
 TYPE_PARSER(sourced(construct<OpenMPFlushConstruct>(verbatim("FLUSH"_tok),
     maybe(Parser<OmpFlushMemoryClause>{}),
