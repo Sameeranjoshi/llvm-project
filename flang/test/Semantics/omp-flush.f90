@@ -1,42 +1,39 @@
 ! RUN: %S/test_errors.sh %s %t %f18 -fopenmp
 ! Check OpenMP 5.0 - 2.17.8 flush Construct
 
-  use omp_lib
+!  use omp_lib
   implicit none
 
-  TYPE someStruct
-    REAL :: rr
-  end TYPE
   integer :: i, a, b
-  real, DIMENSION(10) :: array
-  TYPE(someStruct) :: structObj
-
+  real, DIMENSION(10) :: array, arraya
   a = 1.0
-  !$omp parallel num_threads(4)
-  !No list flushes all.
-  if (omp_get_thread_num() == 1) THEN
-    !$omp flush
-  END IF
-
-
-
-
-
-
   array = (/1, 2, 3, 4, 5, 6, 7, 8, 9, 10/)
-!  !syntax error - yes we get syntax error
+  !$omp parallel num_threads(4)
+
+   !syntax error - yes we get syntax error
 !  !$omp flush ACQ_REL, ACQ_REL
-   !allowed - yes test passed parser.
-!  !$omp flush ACQ_REL
-!  !allowed
+
+  !allowed - yes test passed parser.
+  !$omp flush ACQ_REL
+  !allowed
+  !$omp flush RELEASE
+
+!  not allowed
   !$omp flush SEQ_CST
-!  !allowed
-!  !$omp flush RELEASE
-!  !syntax error
+!  not allowed
   !$omp flush RELAXED
-!  !syntax error
-!  !$omp flush PRIVATE
+  !$omp flush PRIVATE(a)
+  !$omp flush SIMDLEN(10)
+  !$omp flush NUM_THREADS(4)
+  !$omp flush COLLAPSE(1)
+  !$omp flush ALLOCATE(a)
+  !$omp flush COPYIN(a)
+  !$omp flush DEFAULT(private)
+  !$omp flush DEFAULTMAP(tofrom:scalar)
+  !$omp flush DEVICE(0)
+  !$omp flush DIST_SCHEDULE(static, 2)
+  !$omp flush FIRSTPRIVATE(b)
+  !$omp flush FROM(arraya)
 
-
-  !$omp end parallel
+!$omp end parallel
 end
