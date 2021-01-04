@@ -15,6 +15,7 @@
 #ifndef LLVM_CLANG_BASIC_MODULE_H
 #define LLVM_CLANG_BASIC_MODULE_H
 
+#include "clang/Basic/DirectoryEntry.h"
 #include "clang/Basic/FileEntry.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -44,8 +45,6 @@ class raw_ostream;
 
 namespace clang {
 
-class DirectoryEntry;
-class FileEntry;
 class FileManager;
 class LangOptions;
 class TargetInfo;
@@ -134,7 +133,9 @@ public:
   std::string PresumedModuleMapFile;
 
   /// The umbrella header or directory.
-  const void *Umbrella = nullptr;
+  llvm::PointerUnion<const FileEntryRef::MapEntry *,
+                     const DirectoryEntryRef::MapEntry *>
+      Umbrella;
 
   /// The module signature.
   ASTFileSignature Signature;
@@ -189,18 +190,18 @@ public:
   /// file.
   struct Header {
     std::string NameAsWritten;
-    const FileEntry *Entry;
+    OptionalFileEntryRefDegradesToFileEntryPtr Entry;
 
-    explicit operator bool() { return Entry; }
+    explicit operator bool() { return Entry != None; }
   };
 
   /// Information about a directory name as found in the module map
   /// file.
   struct DirectoryName {
     std::string NameAsWritten;
-    const DirectoryEntry *Entry;
+    OptionalDirectoryEntryRefDegradesToDirectoryEntryPtr Entry;
 
-    explicit operator bool() { return Entry; }
+    explicit operator bool() { return Entry != None; }
   };
 
   /// The headers that are part of this module.
@@ -302,9 +303,6 @@ public:
   /// Whether this module came from a "private" module map, found next
   /// to a regular (public) module map.
   unsigned ModuleMapIsPrivate : 1;
-
-  /// Whether Umbrella is a directory or header.
-  unsigned HasUmbrellaDir : 1;
 
   /// Describes the visibility of the various names within a
   /// particular module.
@@ -548,15 +546,16 @@ public:
   /// Retrieve the header that serves as the umbrella header for this
   /// module.
   Header getUmbrellaHeader() const {
-    if (!HasUmbrellaDir)
-      return Header{UmbrellaAsWritten,
-                    static_cast<const FileEntry *>(Umbrella)};
+    if (auto *ME = Umbrella.dyn_cast<const FileEntryRef::MapEntry *>())
+      return Header{UmbrellaAsWritten, FileEntryRef(*ME)};
     return Header{};
   }
 
   /// Determine whether this module has an umbrella directory that is
   /// not based on an umbrella header.
-  bool hasUmbrellaDir() const { return Umbrella && HasUmbrellaDir; }
+  bool hasUmbrellaDir() const {
+    return Umbrella && Umbrella.is<const DirectoryEntryRef::MapEntry *>();
+  }
 
   /// Add a top-level header associated with this module.
   void addTopHeader(const FileEntry *File);

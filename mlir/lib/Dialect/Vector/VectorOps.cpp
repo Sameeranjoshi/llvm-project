@@ -18,7 +18,7 @@
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Function.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/TypeUtilities.h"
@@ -336,7 +336,7 @@ static LogicalResult verifyOutputShape(
       VectorType v = pair.first;
       auto map = pair.second;
       for (unsigned idx = 0, e = v.getRank(); idx < e; ++idx) {
-        unsigned pos = map.getResult(idx).cast<AffineDimExpr>().getPosition();
+        unsigned pos = map.getDimPosition(idx);
         if (!extents[pos])
           extents[pos] = getAffineConstantExpr(v.getShape()[idx], ctx);
       }
@@ -666,8 +666,8 @@ static LogicalResult foldExtractOpFromExtractChain(ExtractOp extractOp) {
   // OpBuilder is only used as a helper to build an I64ArrayAttr.
   OpBuilder b(extractOp.getContext());
   std::reverse(globalPosition.begin(), globalPosition.end());
-  extractOp.setAttr(ExtractOp::getPositionAttrName(),
-                    b.getI64ArrayAttr(globalPosition));
+  extractOp->setAttr(ExtractOp::getPositionAttrName(),
+                     b.getI64ArrayAttr(globalPosition));
   return success();
 }
 
@@ -722,8 +722,8 @@ static LogicalResult foldExtractOpFromTranspose(ExtractOp extractOp) {
       inversePermutation(permutationMap).compose(extractedPos);
   // OpBuilder is only used as a helper to build an I64ArrayAttr.
   OpBuilder b(extractOp.getContext());
-  extractOp.setAttr(ExtractOp::getPositionAttrName(),
-                    b.getI64ArrayAttr(newExtractedPos));
+  extractOp->setAttr(ExtractOp::getPositionAttrName(),
+                     b.getI64ArrayAttr(newExtractedPos));
 
   return success();
 }
@@ -785,8 +785,7 @@ static Value foldExtractOpFromInsertChainAndTranspose(ExtractOp extractOp) {
     if (insertedPos.size() == extractedPos.size()) {
       bool fold = true;
       for (unsigned idx = 0, sz = extractedPos.size(); idx < sz; ++idx) {
-        auto pos =
-            permutationMap.getResult(idx).cast<AffineDimExpr>().getPosition();
+        auto pos = permutationMap.getDimPosition(idx);
         if (pos >= sz || insertedPos[pos] != extractedPos[idx]) {
           fold = false;
           break;
@@ -833,8 +832,8 @@ static Value foldExtractFromBroadcast(ExtractOp extractOp) {
     extractOp.setOperand(broadcastOp.source());
     // OpBuilder is only used as a helper to build an I64ArrayAttr.
     OpBuilder b(extractOp.getContext());
-    extractOp.setAttr(ExtractOp::getPositionAttrName(),
-                      b.getI64ArrayAttr(extractPos));
+    extractOp->setAttr(ExtractOp::getPositionAttrName(),
+                       b.getI64ArrayAttr(extractPos));
     return extractOp.getResult();
   }
   // TODO: In case the rank of the broadcast source is greater than the rank of
@@ -896,8 +895,8 @@ static Value foldExtractFromShapeCast(ExtractOp extractOp) {
   SmallVector<int64_t, 4> newPosition = delinearize(newStrides, position);
   // OpBuilder is only used as a helper to build an I64ArrayAttr.
   OpBuilder b(extractOp.getContext());
-  extractOp.setAttr(ExtractOp::getPositionAttrName(),
-                    b.getI64ArrayAttr(newPosition));
+  extractOp->setAttr(ExtractOp::getPositionAttrName(),
+                     b.getI64ArrayAttr(newPosition));
   extractOp.setOperand(shapeCastOp.source());
   return extractOp.getResult();
 }
@@ -999,32 +998,78 @@ void ExtractSlicesOp::getStrides(SmallVectorImpl<int64_t> &results) {
 //===----------------------------------------------------------------------===//
 
 void ExtractMapOp::build(OpBuilder &builder, OperationState &result,
-                         Value vector, Value id, int64_t multiplicity) {
+                         Value vector, ValueRange ids,
+                         ArrayRef<int64_t> multiplicity,
+                         AffineMap permutationMap) {
+  assert(ids.size() == multiplicity.size() &&
+         ids.size() == permutationMap.getNumResults());
+  assert(permutationMap.isProjectedPermutation());
   VectorType type = vector.getType().cast<VectorType>();
-  VectorType resultType = VectorType::get(type.getNumElements() / multiplicity,
-                                          type.getElementType());
-  ExtractMapOp::build(builder, result, resultType, vector, id);
+  SmallVector<int64_t, 4> newShape(type.getShape().begin(),
+                                   type.getShape().end());
+  for (unsigned i = 0, e = permutationMap.getNumResults(); i < e; i++) {
+    AffineExpr expr = permutationMap.getResult(i);
+    auto dim = expr.cast<AffineDimExpr>();
+    newShape[dim.getPosition()] = newShape[dim.getPosition()] / multiplicity[i];
+  }
+  VectorType resultType = VectorType::get(newShape, type.getElementType());
+  ExtractMapOp::build(builder, result, resultType, vector, ids);
 }
 
 static LogicalResult verify(ExtractMapOp op) {
-  if (op.getSourceVectorType().getShape().size() != 1 ||
-      op.getResultType().getShape().size() != 1)
-    return op.emitOpError("expects source and destination vectors of rank 1");
-  if (op.getSourceVectorType().getNumElements() %
-          op.getResultType().getNumElements() !=
-      0)
+  if (op.getSourceVectorType().getRank() != op.getResultType().getRank())
     return op.emitOpError(
-        "source vector size must be a multiple of destination vector size");
+        "expected source and destination vectors of same rank");
+  unsigned numId = 0;
+  for (unsigned i = 0, e = op.getSourceVectorType().getRank(); i < e; ++i) {
+    if (op.getSourceVectorType().getDimSize(i) %
+            op.getResultType().getDimSize(i) !=
+        0)
+      return op.emitOpError("source vector dimensions must be a multiple of "
+                            "destination vector dimensions");
+    if (op.getSourceVectorType().getDimSize(i) !=
+        op.getResultType().getDimSize(i))
+      numId++;
+  }
+  if (numId != op.ids().size())
+    return op.emitOpError("expected number of ids must match the number of "
+                          "dimensions distributed");
   return success();
 }
 
 OpFoldResult ExtractMapOp::fold(ArrayRef<Attribute> operands) {
   auto insert = vector().getDefiningOp<vector::InsertMapOp>();
-  if (insert == nullptr || multiplicity() != insert.multiplicity() ||
-      id() != insert.id())
+  if (insert == nullptr || getType() != insert.vector().getType() ||
+      ids() != insert.ids())
     return {};
   return insert.vector();
 }
+
+void ExtractMapOp::getMultiplicity(SmallVectorImpl<int64_t> &multiplicity) {
+  assert(multiplicity.empty());
+  for (unsigned i = 0, e = getSourceVectorType().getRank(); i < e; i++) {
+    if (getSourceVectorType().getDimSize(i) != getResultType().getDimSize(i))
+      multiplicity.push_back(getSourceVectorType().getDimSize(i) /
+                             getResultType().getDimSize(i));
+  }
+}
+
+template <typename MapOp>
+AffineMap calculateImplicitMap(MapOp op) {
+  SmallVector<AffineExpr, 4> perm;
+  // Check which dimension have a multiplicity greater than 1 and associated
+  // them to the IDs in order.
+  for (unsigned i = 0, e = op.getSourceVectorType().getRank(); i < e; i++) {
+    if (op.getSourceVectorType().getDimSize(i) !=
+        op.getResultType().getDimSize(i))
+      perm.push_back(getAffineDimExpr(i, op.getContext()));
+  }
+  auto map = AffineMap::get(op.getSourceVectorType().getRank(), 0, perm,
+                            op.getContext());
+  return map;
+}
+
+AffineMap ExtractMapOp::map() { return calculateImplicitMap(*this); }
 
 //===----------------------------------------------------------------------===//
 // BroadcastOp
@@ -1253,25 +1298,32 @@ void InsertSlicesOp::getStrides(SmallVectorImpl<int64_t> &results) {
 //===----------------------------------------------------------------------===//
 
 void InsertMapOp::build(OpBuilder &builder, OperationState &result,
-                        Value vector, Value dest, Value id,
-                        int64_t multiplicity) {
-  VectorType type = vector.getType().cast<VectorType>();
-  VectorType resultType = VectorType::get(type.getNumElements() * multiplicity,
-                                          type.getElementType());
-  InsertMapOp::build(builder, result, resultType, vector, dest, id);
+                        Value vector, Value dest, ValueRange ids) {
+  InsertMapOp::build(builder, result, dest.getType(), vector, dest, ids);
 }
 
 static LogicalResult verify(InsertMapOp op) {
-  if (op.getSourceVectorType().getShape().size() != 1 ||
-      op.getResultType().getShape().size() != 1)
-    return op.emitOpError("expected source and destination vectors of rank 1");
-  if (op.getResultType().getNumElements() %
-          op.getSourceVectorType().getNumElements() !=
-      0)
+  if (op.getSourceVectorType().getRank() != op.getResultType().getRank())
     return op.emitOpError(
-        "destination vector size must be a multiple of source vector size");
+        "expected source and destination vectors of same rank");
+  unsigned numId = 0;
+  for (unsigned i = 0, e = op.getResultType().getRank(); i < e; i++) {
+    if (op.getResultType().getDimSize(i) %
+            op.getSourceVectorType().getDimSize(i) !=
+        0)
+      return op.emitOpError(
+          "destination vector size must be a multiple of source vector size");
+    if (op.getResultType().getDimSize(i) !=
+        op.getSourceVectorType().getDimSize(i))
+      numId++;
+  }
+  if (numId != op.ids().size())
+    return op.emitOpError("expected number of ids must match the number of "
+                          "dimensions distributed");
   return success();
 }
+
+AffineMap InsertMapOp::map() { return calculateImplicitMap(*this); }
 
 //===----------------------------------------------------------------------===//
 // InsertStridedSliceOp
@@ -1374,7 +1426,7 @@ static LogicalResult isSumOfIntegerArrayAttrConfinedToShape(
 static ArrayAttr makeI64ArrayAttr(ArrayRef<int64_t> values,
                                   MLIRContext *context) {
   auto attrs = llvm::map_range(values, [context](int64_t v) -> Attribute {
-    return IntegerAttr::get(IntegerType::get(64, context), APInt(64, v));
+    return IntegerAttr::get(IntegerType::get(context, 64), APInt(64, v));
   });
   return ArrayAttr::get(llvm::to_vector<8>(attrs), context);
 }
@@ -1685,8 +1737,8 @@ foldExtractStridedOpFromInsertChain(ExtractStridedSliceOp op) {
       op.setOperand(insertOp.source());
       // OpBuilder is only used as a helper to build an I64ArrayAttr.
       OpBuilder b(op.getContext());
-      op.setAttr(ExtractStridedSliceOp::getOffsetsAttrName(),
-                 b.getI64ArrayAttr(offsetDiffs));
+      op->setAttr(ExtractStridedSliceOp::getOffsetsAttrName(),
+                  b.getI64ArrayAttr(offsetDiffs));
       return success();
     }
     // If the chunk extracted is disjoint from the chunk inserted, keep looking
@@ -1770,13 +1822,39 @@ public:
   }
 };
 
+// Pattern to rewrite a ExtractStridedSliceOp(splat ConstantOp) -> ConstantOp.
+class StridedSliceConstantFolder final
+    : public OpRewritePattern<ExtractStridedSliceOp> {
+public:
+  using OpRewritePattern<ExtractStridedSliceOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(ExtractStridedSliceOp extractStridedSliceOp,
+                                PatternRewriter &rewriter) const override {
+    // Return if 'extractStridedSliceOp' operand is not defined by a
+    // ConstantOp.
+    auto constantOp =
+        extractStridedSliceOp.vector().getDefiningOp<ConstantOp>();
+    if (!constantOp)
+      return failure();
+    auto dense = constantOp.value().dyn_cast<SplatElementsAttr>();
+    if (!dense)
+      return failure();
+    auto newAttr = DenseElementsAttr::get(
+        extractStridedSliceOp.getType().cast<VectorType>(),
+        dense.getSplatValue());
+    rewriter.replaceOpWithNewOp<ConstantOp>(extractStridedSliceOp, newAttr);
+    return success();
+  }
+};
+
 } // end anonymous namespace
 
 void ExtractStridedSliceOp::getCanonicalizationPatterns(
     OwningRewritePatternList &results, MLIRContext *context) {
   // Pattern to rewrite a ExtractStridedSliceOp(ConstantMaskOp) ->
-  // ConstantMaskOp.
-  results.insert<StridedSliceConstantMaskFolder>(context);
+  // ConstantMaskOp and ExtractStridedSliceOp(ConstantOp) -> ConstantOp.
+  results.insert<StridedSliceConstantMaskFolder, StridedSliceConstantFolder>(
+      context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1812,41 +1890,43 @@ static LogicalResult verifyPermutationMap(AffineMap permutationMap,
   return success();
 }
 
-static LogicalResult verifyTransferOp(Operation *op, MemRefType memrefType,
+static LogicalResult verifyTransferOp(Operation *op, ShapedType shapedType,
                                       VectorType vectorType,
                                       AffineMap permutationMap,
                                       ArrayAttr optionalMasked) {
-  auto memrefElementType = memrefType.getElementType();
-  if (auto memrefVectorElementType = memrefElementType.dyn_cast<VectorType>()) {
-    // Memref has vector element type.
-
-    unsigned memrefVecSize = memrefVectorElementType.getElementTypeBitWidth() *
-                             memrefVectorElementType.getShape().back();
+  if (!shapedType.isa<MemRefType, RankedTensorType>())
+    return op->emitOpError(
+        "requires source to be a memref or ranked tensor type");
+  auto elementType = shapedType.getElementType();
+  if (auto vectorElementType = elementType.dyn_cast<VectorType>()) {
+    // Memref or tensor has vector element type.
+    unsigned sourceVecSize = vectorElementType.getElementTypeBitWidth() *
+                             vectorElementType.getShape().back();
     unsigned resultVecSize =
         vectorType.getElementTypeBitWidth() * vectorType.getShape().back();
-    if (resultVecSize % memrefVecSize != 0)
+    if (resultVecSize % sourceVecSize != 0)
       return op->emitOpError(
           "requires the bitwidth of the minor 1-D vector to be an integral "
-          "multiple of the bitwidth of the minor 1-D vector of the memref");
+          "multiple of the bitwidth of the minor 1-D vector of the source");
 
-    unsigned memrefVecEltRank = memrefVectorElementType.getRank();
+    unsigned sourceVecEltRank = vectorElementType.getRank();
     unsigned resultVecRank = vectorType.getRank();
-    if (memrefVecEltRank > resultVecRank)
+    if (sourceVecEltRank > resultVecRank)
       return op->emitOpError(
-          "requires memref vector element and vector result ranks to match.");
-    unsigned rankOffset = resultVecRank - memrefVecEltRank;
+          "requires source vector element and vector result ranks to match.");
+    unsigned rankOffset = resultVecRank - sourceVecEltRank;
     // Check that permutation map results match 'rankOffset' of vector type.
     if (permutationMap.getNumResults() != rankOffset)
       return op->emitOpError("requires a permutation_map with result dims of "
                              "the same rank as the vector type");
   } else {
-    // Memref has scalar element type.
+    // Memref or tensor has scalar element type.
     unsigned resultVecSize =
         vectorType.getElementTypeBitWidth() * vectorType.getShape().back();
-    if (resultVecSize % memrefElementType.getIntOrFloatBitWidth() != 0)
+    if (resultVecSize % elementType.getIntOrFloatBitWidth() != 0)
       return op->emitOpError(
           "requires the bitwidth of the minor 1-D vector to be an integral "
-          "multiple of the bitwidth of the memref element type");
+          "multiple of the bitwidth of the source element type");
 
     // Check that permutation map results match rank of vector type.
     if (permutationMap.getNumResults() != vectorType.getRank())
@@ -1856,9 +1936,9 @@ static LogicalResult verifyTransferOp(Operation *op, MemRefType memrefType,
 
   if (permutationMap.getNumSymbols() != 0)
     return op->emitOpError("requires permutation_map without symbols");
-  if (permutationMap.getNumInputs() != memrefType.getRank())
+  if (permutationMap.getNumInputs() != shapedType.getRank())
     return op->emitOpError("requires a permutation_map with input dims of the "
-                           "same rank as the memref type");
+                           "same rank as the source type");
 
   if (optionalMasked) {
     if (permutationMap.getNumResults() !=
@@ -1900,7 +1980,7 @@ void TransferReadOp::build(OpBuilder &builder, OperationState &result,
 static void printTransferAttrs(OpAsmPrinter &p, VectorTransferOpInterface op) {
   SmallVector<StringRef, 2> elidedAttrs;
   if (op.permutation_map() ==
-      getTransferMinorIdentityMap(op.getMemRefType(), op.getVectorType()))
+      getTransferMinorIdentityMap(op.getShapedType(), op.getVectorType()))
     elidedAttrs.push_back(op.getPermutationMapAttrName());
   bool elideMasked = true;
   if (auto maybeMasked = op.masked()) {
@@ -1917,21 +1997,21 @@ static void printTransferAttrs(OpAsmPrinter &p, VectorTransferOpInterface op) {
 }
 
 static void print(OpAsmPrinter &p, TransferReadOp op) {
-  p << op.getOperationName() << " " << op.memref() << "[" << op.indices()
+  p << op.getOperationName() << " " << op.source() << "[" << op.indices()
     << "], " << op.padding();
   printTransferAttrs(p, cast<VectorTransferOpInterface>(op.getOperation()));
-  p << " : " << op.getMemRefType() << ", " << op.getVectorType();
+  p << " : " << op.getShapedType() << ", " << op.getVectorType();
 }
 
 static ParseResult parseTransferReadOp(OpAsmParser &parser,
                                        OperationState &result) {
   llvm::SMLoc typesLoc;
-  OpAsmParser::OperandType memrefInfo;
+  OpAsmParser::OperandType sourceInfo;
   SmallVector<OpAsmParser::OperandType, 8> indexInfo;
   OpAsmParser::OperandType paddingInfo;
   SmallVector<Type, 2> types;
   // Parsing with support for paddingValue.
-  if (parser.parseOperand(memrefInfo) ||
+  if (parser.parseOperand(sourceInfo) ||
       parser.parseOperandList(indexInfo, OpAsmParser::Delimiter::Square) ||
       parser.parseComma() || parser.parseOperand(paddingInfo) ||
       parser.parseOptionalAttrDict(result.attributes) ||
@@ -1940,48 +2020,48 @@ static ParseResult parseTransferReadOp(OpAsmParser &parser,
   if (types.size() != 2)
     return parser.emitError(typesLoc, "requires two types");
   auto indexType = parser.getBuilder().getIndexType();
-  MemRefType memRefType = types[0].dyn_cast<MemRefType>();
-  if (!memRefType)
-    return parser.emitError(typesLoc, "requires memref type");
+  auto shapedType = types[0].dyn_cast<ShapedType>();
+  if (!shapedType || !shapedType.isa<MemRefType, RankedTensorType>())
+    return parser.emitError(typesLoc, "requires memref or ranked tensor type");
   VectorType vectorType = types[1].dyn_cast<VectorType>();
   if (!vectorType)
     return parser.emitError(typesLoc, "requires vector type");
   auto permutationAttrName = TransferReadOp::getPermutationMapAttrName();
   auto attr = result.attributes.get(permutationAttrName);
   if (!attr) {
-    auto permMap = getTransferMinorIdentityMap(memRefType, vectorType);
+    auto permMap = getTransferMinorIdentityMap(shapedType, vectorType);
     result.attributes.set(permutationAttrName, AffineMapAttr::get(permMap));
   }
   return failure(
-      parser.resolveOperand(memrefInfo, memRefType, result.operands) ||
+      parser.resolveOperand(sourceInfo, shapedType, result.operands) ||
       parser.resolveOperands(indexInfo, indexType, result.operands) ||
-      parser.resolveOperand(paddingInfo, memRefType.getElementType(),
+      parser.resolveOperand(paddingInfo, shapedType.getElementType(),
                             result.operands) ||
       parser.addTypeToList(vectorType, result.types));
 }
 
 static LogicalResult verify(TransferReadOp op) {
-  // Consistency of elemental types in memref and vector.
-  MemRefType memrefType = op.getMemRefType();
+  // Consistency of elemental types in source and vector.
+  ShapedType shapedType = op.getShapedType();
   VectorType vectorType = op.getVectorType();
   auto paddingType = op.padding().getType();
   auto permutationMap = op.permutation_map();
-  auto memrefElementType = memrefType.getElementType();
+  auto sourceElementType = shapedType.getElementType();
 
-  if (static_cast<int64_t>(op.indices().size()) != memrefType.getRank())
-    return op.emitOpError("requires ") << memrefType.getRank() << " indices";
+  if (static_cast<int64_t>(op.indices().size()) != shapedType.getRank())
+    return op.emitOpError("requires ") << shapedType.getRank() << " indices";
 
-  if (failed(verifyTransferOp(op.getOperation(), memrefType, vectorType,
+  if (failed(verifyTransferOp(op.getOperation(), shapedType, vectorType,
                               permutationMap,
                               op.masked() ? *op.masked() : ArrayAttr())))
     return failure();
 
-  if (auto memrefVectorElementType = memrefElementType.dyn_cast<VectorType>()) {
-    // Memref has vector element type.
-    // Check that 'memrefVectorElementType' and 'paddingType' types match.
-    if (memrefVectorElementType != paddingType)
+  if (auto sourceVectorElementType = sourceElementType.dyn_cast<VectorType>()) {
+    // Source has vector element type.
+    // Check that 'sourceVectorElementType' and 'paddingType' types match.
+    if (sourceVectorElementType != paddingType)
       return op.emitOpError(
-          "requires memref element type and padding type to match.");
+          "requires source element type and padding type to match.");
 
   } else {
     // Check that 'paddingType' is valid to store in a vector type.
@@ -1989,9 +2069,9 @@ static LogicalResult verify(TransferReadOp op) {
       return op.emitOpError("requires valid padding vector elemental type");
 
     // Check that padding type and vector element types match.
-    if (paddingType != memrefElementType)
+    if (paddingType != sourceElementType)
       return op.emitOpError(
-          "requires formal padding and memref of the same elemental type");
+          "requires formal padding and source of the same elemental type");
   }
 
   return verifyPermutationMap(permutationMap,
@@ -2018,18 +2098,18 @@ static LogicalResult foldMemRefCast(Operation *op) {
 template <typename TransferOp>
 static bool isInBounds(TransferOp op, int64_t resultIdx, int64_t indicesIdx) {
   // TODO: support more aggressive createOrFold on:
-  // `op.indices()[indicesIdx] + vectorType < dim(op.memref(), indicesIdx)`
-  if (op.getMemRefType().isDynamicDim(indicesIdx))
+  // `op.indices()[indicesIdx] + vectorType < dim(op.source(), indicesIdx)`
+  if (op.getShapedType().isDynamicDim(indicesIdx))
     return false;
   Value index = op.indices()[indicesIdx];
   auto cstOp = index.getDefiningOp<ConstantIndexOp>();
   if (!cstOp)
     return false;
 
-  int64_t memrefSize = op.getMemRefType().getDimSize(indicesIdx);
+  int64_t sourceSize = op.getShapedType().getDimSize(indicesIdx);
   int64_t vectorSize = op.getVectorType().getDimSize(resultIdx);
 
-  return cstOp.getValue() + vectorSize <= memrefSize;
+  return cstOp.getValue() + vectorSize <= sourceSize;
 }
 
 template <typename TransferOp>
@@ -2057,7 +2137,7 @@ static LogicalResult foldTransferMaskAttribute(TransferOp op) {
     return failure();
   // OpBuilder is only used as a helper to build an I64ArrayAttr.
   OpBuilder b(op.getContext());
-  op.setAttr(TransferOp::getMaskedAttrName(), b.getBoolArrayAttr(isMasked));
+  op->setAttr(TransferOp::getMaskedAttrName(), b.getBoolArrayAttr(isMasked));
   return success();
 }
 
@@ -2081,34 +2161,51 @@ Optional<SmallVector<int64_t, 4>> TransferReadOp::getShapeForUnroll() {
 
 /// Builder that sets permutation map to 'getMinorIdentityMap'.
 void TransferWriteOp::build(OpBuilder &builder, OperationState &result,
-                            Value vector, Value memref, ValueRange indices,
+                            Value vector, Value source, ValueRange indices,
                             ArrayRef<bool> maybeMasked) {
   auto vectorType = vector.getType().cast<VectorType>();
   auto permMap = getTransferMinorIdentityMap(
-      memref.getType().cast<MemRefType>(), vectorType);
+      source.getType().cast<MemRefType>(), vectorType);
   if (maybeMasked.empty())
-    return build(builder, result, vector, memref, indices, permMap,
+    return build(builder, result, vector, source, indices, permMap,
                  ArrayAttr());
   ArrayAttr maskedArrayAttr = builder.getBoolArrayAttr(maybeMasked);
-  build(builder, result, vector, memref, indices, permMap, maskedArrayAttr);
+  build(builder, result, vector, source, indices, permMap, maskedArrayAttr);
 }
 
-/// Builder that sets permutation map to 'getMinorIdentityMap'.
 void TransferWriteOp::build(OpBuilder &builder, OperationState &result,
-                            Value vector, Value memref, ValueRange indices,
+                            Value vector, Value source, ValueRange indices,
                             AffineMap permutationMap) {
-  build(builder, result, vector, memref, indices,
-        /*maybeMasked=*/ArrayRef<bool>{});
+  build(builder, result, vector, source, indices, permutationMap,
+        /*maybeMasked=*/ArrayAttr());
+}
+
+void TransferWriteOp::build(OpBuilder &builder, OperationState &result,
+                            Value vector, Value source, ValueRange indices,
+                            AffineMapAttr permutationMap,
+                            /*optional*/ ArrayAttr masked) {
+  Type resultType = source.getType().dyn_cast<RankedTensorType>();
+  build(builder, result, resultType, vector, source, indices, permutationMap,
+        masked);
+}
+
+void TransferWriteOp::build(OpBuilder &builder, OperationState &result,
+                            Value vector, Value source, ValueRange indices,
+                            AffineMap permutationMap,
+                            /*optional*/ ArrayAttr masked) {
+  Type resultType = source.getType().dyn_cast<RankedTensorType>();
+  build(builder, result, resultType, vector, source, indices, permutationMap,
+        masked);
 }
 
 static ParseResult parseTransferWriteOp(OpAsmParser &parser,
                                         OperationState &result) {
   llvm::SMLoc typesLoc;
-  OpAsmParser::OperandType vectorInfo, memrefInfo;
+  OpAsmParser::OperandType vectorInfo, sourceInfo;
   SmallVector<OpAsmParser::OperandType, 8> indexInfo;
   SmallVector<Type, 2> types;
   if (parser.parseOperand(vectorInfo) || parser.parseComma() ||
-      parser.parseOperand(memrefInfo) ||
+      parser.parseOperand(sourceInfo) ||
       parser.parseOperandList(indexInfo, OpAsmParser::Delimiter::Square) ||
       parser.parseOptionalAttrDict(result.attributes) ||
       parser.getCurrentLocation(&typesLoc) || parser.parseColonTypeList(types))
@@ -2119,38 +2216,40 @@ static ParseResult parseTransferWriteOp(OpAsmParser &parser,
   VectorType vectorType = types[0].dyn_cast<VectorType>();
   if (!vectorType)
     return parser.emitError(typesLoc, "requires vector type");
-  MemRefType memRefType = types[1].dyn_cast<MemRefType>();
-  if (!memRefType)
-    return parser.emitError(typesLoc, "requires memref type");
+  ShapedType shapedType = types[1].dyn_cast<ShapedType>();
+  if (!shapedType || !shapedType.isa<MemRefType, RankedTensorType>())
+    return parser.emitError(typesLoc, "requires memref or ranked tensor type");
   auto permutationAttrName = TransferWriteOp::getPermutationMapAttrName();
   auto attr = result.attributes.get(permutationAttrName);
   if (!attr) {
-    auto permMap = getTransferMinorIdentityMap(memRefType, vectorType);
+    auto permMap = getTransferMinorIdentityMap(shapedType, vectorType);
     result.attributes.set(permutationAttrName, AffineMapAttr::get(permMap));
   }
   return failure(
       parser.resolveOperand(vectorInfo, vectorType, result.operands) ||
-      parser.resolveOperand(memrefInfo, memRefType, result.operands) ||
-      parser.resolveOperands(indexInfo, indexType, result.operands));
+      parser.resolveOperand(sourceInfo, shapedType, result.operands) ||
+      parser.resolveOperands(indexInfo, indexType, result.operands) ||
+      (shapedType.isa<RankedTensorType>() &&
+       parser.addTypeToList(shapedType, result.types)));
 }
 
 static void print(OpAsmPrinter &p, TransferWriteOp op) {
-  p << op.getOperationName() << " " << op.vector() << ", " << op.memref() << "["
+  p << op.getOperationName() << " " << op.vector() << ", " << op.source() << "["
     << op.indices() << "]";
   printTransferAttrs(p, cast<VectorTransferOpInterface>(op.getOperation()));
-  p << " : " << op.getVectorType() << ", " << op.getMemRefType();
+  p << " : " << op.getVectorType() << ", " << op.getShapedType();
 }
 
 static LogicalResult verify(TransferWriteOp op) {
   // Consistency of elemental types in memref and vector.
-  MemRefType memrefType = op.getMemRefType();
+  ShapedType shapedType = op.getShapedType();
   VectorType vectorType = op.getVectorType();
   auto permutationMap = op.permutation_map();
 
-  if (llvm::size(op.indices()) != memrefType.getRank())
-    return op.emitOpError("requires ") << memrefType.getRank() << " indices";
+  if (llvm::size(op.indices()) != shapedType.getRank())
+    return op.emitOpError("requires ") << shapedType.getRank() << " indices";
 
-  if (failed(verifyTransferOp(op.getOperation(), memrefType, vectorType,
+  if (failed(verifyTransferOp(op.getOperation(), shapedType, vectorType,
                               permutationMap,
                               op.masked() ? *op.masked() : ArrayAttr())))
     return failure();
@@ -2560,6 +2659,36 @@ OpFoldResult ShapeCastOp::fold(ArrayRef<Attribute> operands) {
   return {};
 }
 
+namespace {
+// Pattern to rewrite a ShapeCast(splat ConstantOp) -> ConstantOp.
+class ShapeCastConstantFolder final : public OpRewritePattern<ShapeCastOp> {
+public:
+  using OpRewritePattern<ShapeCastOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(ShapeCastOp shapeCastOp,
+                                PatternRewriter &rewriter) const override {
+    auto constantOp = shapeCastOp.source().getDefiningOp<ConstantOp>();
+    if (!constantOp)
+      return failure();
+    // Only handle splat for now.
+    auto dense = constantOp.value().dyn_cast<SplatElementsAttr>();
+    if (!dense)
+      return failure();
+    auto newAttr = DenseElementsAttr::get(
+        shapeCastOp.getType().cast<VectorType>(), dense.getSplatValue());
+    rewriter.replaceOpWithNewOp<ConstantOp>(shapeCastOp, newAttr);
+    return success();
+  }
+};
+
+} // namespace
+
+void ShapeCastOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+                                              MLIRContext *context) {
+  // Pattern to rewrite a ShapeCastOp(ConstantOp) -> ConstantOp.
+  results.insert<ShapeCastConstantFolder>(context);
+}
+
 //===----------------------------------------------------------------------===//
 // VectorBitCastOp
 //===----------------------------------------------------------------------===//
@@ -2660,7 +2789,7 @@ static ParseResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
       parser.parseOptionalAttrDict(result.attributes) ||
       parser.parseColonTypeList(types) ||
       parser.resolveOperands(operandInfos, types, loc, result.operands) ||
-      parser.addTypeToList(TupleType::get(types, ctx), result.types));
+      parser.addTypeToList(TupleType::get(ctx, types), result.types));
 }
 
 static void print(OpAsmPrinter &p, TupleOp op) {
@@ -2668,7 +2797,7 @@ static void print(OpAsmPrinter &p, TupleOp op) {
   p.printOperands(op.getOperands());
   p.printOptionalAttrDict(op.getAttrs());
   p << " : ";
-  llvm::interleaveComma(op.getOperation()->getOperandTypes(), p);
+  llvm::interleaveComma(op->getOperandTypes(), p);
 }
 
 static LogicalResult verify(TupleOp op) { return success(); }

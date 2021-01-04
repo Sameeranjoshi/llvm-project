@@ -485,8 +485,8 @@ int GCNHazardRecognizer::getWaitStatesSinceSetReg(IsHazardFn IsHazard,
 // No-op Hazard Detection
 //===----------------------------------------------------------------------===//
 
-static void addRegUnits(const SIRegisterInfo &TRI,
-                        BitVector &BV, unsigned Reg) {
+static void addRegUnits(const SIRegisterInfo &TRI, BitVector &BV,
+                        MCRegister Reg) {
   for (MCRegUnitIterator RUI(Reg, &TRI); RUI.isValid(); ++RUI)
     BV.set(*RUI);
 }
@@ -496,7 +496,7 @@ static void addRegsToSet(const SIRegisterInfo &TRI,
                          BitVector &Set) {
   for (const MachineOperand &Op : Ops) {
     if (Op.isReg())
-      addRegUnits(TRI, Set, Op.getReg());
+      addRegUnits(TRI, Set, Op.getReg().asMCReg());
   }
 }
 
@@ -1184,7 +1184,7 @@ int GCNHazardRecognizer::checkFPAtomicToDenormModeHazard(MachineInstr *MI) {
     case AMDGPU::S_WAITCNT_VMCNT:
     case AMDGPU::S_WAITCNT_EXPCNT:
     case AMDGPU::S_WAITCNT_LGKMCNT:
-    case AMDGPU::S_WAITCNT_IDLE:
+    case AMDGPU::S_WAIT_IDLE:
       return true;
     default:
       break;

@@ -83,7 +83,7 @@ unsigned DIEDwarfExpression::getTemporaryBufferSize() {
 void DIEDwarfExpression::commitTemporaryBuffer() { OutDIE.takeValues(TmpDIE); }
 
 bool DIEDwarfExpression::isFrameRegister(const TargetRegisterInfo &TRI,
-                                         unsigned MachineReg) {
+                                         llvm::Register MachineReg) {
   return MachineReg == TRI.getFrameRegister(*AP.MF);
 }
 
@@ -434,28 +434,6 @@ void DwarfUnit::addSourceLine(DIE &Die, const DIObjCProperty *Ty) {
   addSourceLine(Die, Ty->getLine(), Ty->getFile());
 }
 
-void DwarfUnit::addConstantFPValue(DIE &Die, const MachineOperand &MO) {
-  assert(MO.isFPImm() && "Invalid machine operand!");
-  DIEBlock *Block = new (DIEValueAllocator) DIEBlock;
-  APFloat FPImm = MO.getFPImm()->getValueAPF();
-
-  // Get the raw data form of the floating point.
-  const APInt FltVal = FPImm.bitcastToAPInt();
-  const char *FltPtr = (const char *)FltVal.getRawData();
-
-  int NumBytes = FltVal.getBitWidth() / 8; // 8 bits per byte.
-  bool LittleEndian = Asm->getDataLayout().isLittleEndian();
-  int Incr = (LittleEndian ? 1 : -1);
-  int Start = (LittleEndian ? 0 : NumBytes - 1);
-  int Stop = (LittleEndian ? NumBytes : -1);
-
-  // Output the constant to DWARF one byte at a time.
-  for (; Start != Stop; Start += Incr)
-    addUInt(*Block, dwarf::DW_FORM_data1, (unsigned char)0xFF & FltPtr[Start]);
-
-  addBlock(Die, dwarf::DW_AT_const_value, Block);
-}
-
 void DwarfUnit::addConstantFPValue(DIE &Die, const ConstantFP *CFP) {
   // Pass this down to addConstantValue as an unsigned bag of bits.
   addConstantValue(Die, CFP->getValueAPF().bitcastToAPInt(), true);
@@ -464,13 +442,6 @@ void DwarfUnit::addConstantFPValue(DIE &Die, const ConstantFP *CFP) {
 void DwarfUnit::addConstantValue(DIE &Die, const ConstantInt *CI,
                                  const DIType *Ty) {
   addConstantValue(Die, CI->getValue(), Ty);
-}
-
-void DwarfUnit::addConstantValue(DIE &Die, const MachineOperand &MO,
-                                 const DIType *Ty) {
-  assert(MO.isImm() && "Invalid machine operand!");
-
-  addConstantValue(Die, DD->isUnsignedDIType(Ty), MO.getImm());
 }
 
 void DwarfUnit::addConstantValue(DIE &Die, uint64_t Val, const DIType *Ty) {
@@ -725,6 +696,15 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIStringType *STy) {
   if (DIVariable *Var = STy->getStringLength()) {
     if (auto *VarDIE = getDIE(Var))
       addDIEEntry(Buffer, dwarf::DW_AT_string_length, *VarDIE);
+  } else if (DIExpression *Expr = STy->getStringLengthExp()) {
+    DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+    DIEDwarfExpression DwarfExpr(*Asm, getCU(), *Loc);
+    // This is to describe the memory location of the
+    // length of a Fortran deferred length string, so
+    // lock it down as such.
+    DwarfExpr.setMemoryLocationKind();
+    DwarfExpr.addExpression(Expr);
+    addBlock(Buffer, dwarf::DW_AT_string_length, DwarfExpr.finalize());
   } else {
     uint64_t Size = STy->getSizeInBits() >> 3;
     addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
@@ -1087,6 +1067,8 @@ DIE *DwarfUnit::getOrCreateModule(const DIModule *M) {
             getOrCreateSourceID(M->getFile()));
   if (M->getLineNo())
     addUInt(MDie, dwarf::DW_AT_decl_line, None, M->getLineNo());
+  if (M->getIsDecl())
+    addFlag(MDie, dwarf::DW_AT_declaration);
 
   return &MDie;
 }

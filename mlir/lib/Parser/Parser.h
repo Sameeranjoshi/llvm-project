@@ -36,13 +36,12 @@ public:
   /// Parse a comma-separated list of elements up until the specified end token.
   ParseResult
   parseCommaSeparatedListUntil(Token::Kind rightToken,
-                               const std::function<ParseResult()> &parseElement,
+                               function_ref<ParseResult()> parseElement,
                                bool allowEmptyList = true);
 
   /// Parse a comma separated list of elements that must have at least one entry
   /// in it.
-  ParseResult
-  parseCommaSeparatedList(const std::function<ParseResult()> &parseElement);
+  ParseResult parseCommaSeparatedList(function_ref<ParseResult()> parseElement);
 
   ParseResult parsePrettyDialectSymbolName(StringRef &prettyName);
 
@@ -127,6 +126,9 @@ public:
   /// Consume the specified token if present and return success.  On failure,
   /// output a diagnostic and return failure.
   ParseResult parseToken(Token::Kind expectedToken, const Twine &message);
+
+  /// Parse an optional integer value from the stream.
+  OptionalParseResult parseOptionalInteger(uint64_t &result);
 
   //===--------------------------------------------------------------------===//
   // Type Parsing
@@ -232,9 +234,6 @@ public:
   // Location Parsing
   //===--------------------------------------------------------------------===//
 
-  /// Parse an inline location.
-  ParseResult parseLocation(LocationAttr &loc);
-
   /// Parse a raw location instance.
   ParseResult parseLocationInstance(LocationAttr &loc);
 
@@ -246,23 +245,6 @@ public:
 
   /// Parse a name or FileLineCol location instance.
   ParseResult parseNameOrFileLineColLocation(LocationAttr &loc);
-
-  /// Parse an optional trailing location.
-  ///
-  ///   trailing-location     ::= (`loc` `(` location `)`)?
-  ///
-  ParseResult parseOptionalTrailingLocation(Location &loc) {
-    // If there is a 'loc' we parse a trailing location.
-    if (!getToken().is(Token::kw_loc))
-      return success();
-
-    // Parse the location.
-    LocationAttr directLoc;
-    if (parseLocation(directLoc))
-      return failure();
-    loc = directLoc;
-    return success();
-  }
 
   //===--------------------------------------------------------------------===//
   // Affine Parsing

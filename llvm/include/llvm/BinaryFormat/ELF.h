@@ -107,13 +107,17 @@ struct Elf64_Ehdr {
   unsigned char getDataEncoding() const { return e_ident[EI_DATA]; }
 };
 
-// File types
+// File types.
+// See current registered ELF types at:
+//    http://www.sco.com/developers/gabi/latest/ch4.eheader.html
 enum {
   ET_NONE = 0,        // No file type
   ET_REL = 1,         // Relocatable file
   ET_EXEC = 2,        // Executable file
   ET_DYN = 3,         // Shared object file
   ET_CORE = 4,        // Core file
+  ET_LOOS = 0xfe00,   // Beginning of operating system-specific codes
+  ET_HIOS = 0xfeff,   // Operating system-specific
   ET_LOPROC = 0xff00, // Beginning of processor-specific codes
   ET_HIPROC = 0xffff  // Processor-specific
 };
@@ -713,14 +717,14 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_GFX906        = 0x02f,
   EF_AMDGPU_MACH_AMDGCN_GFX908        = 0x030,
   EF_AMDGPU_MACH_AMDGCN_GFX909        = 0x031,
-  EF_AMDGPU_MACH_AMDGCN_RESERVED_0X32 = 0x032,
+  EF_AMDGPU_MACH_AMDGCN_GFX90C        = 0x032,
   EF_AMDGPU_MACH_AMDGCN_GFX1010       = 0x033,
   EF_AMDGPU_MACH_AMDGCN_GFX1011       = 0x034,
   EF_AMDGPU_MACH_AMDGCN_GFX1012       = 0x035,
   EF_AMDGPU_MACH_AMDGCN_GFX1030       = 0x036,
   EF_AMDGPU_MACH_AMDGCN_GFX1031       = 0x037,
   EF_AMDGPU_MACH_AMDGCN_GFX1032       = 0x038,
-  EF_AMDGPU_MACH_AMDGCN_RESERVED_0X39 = 0x039,
+  EF_AMDGPU_MACH_AMDGCN_GFX1033       = 0x039,
   EF_AMDGPU_MACH_AMDGCN_GFX602        = 0x03a,
   EF_AMDGPU_MACH_AMDGCN_GFX705        = 0x03b,
   EF_AMDGPU_MACH_AMDGCN_GFX805        = 0x03c,

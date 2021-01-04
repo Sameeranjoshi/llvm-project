@@ -90,7 +90,7 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   SmallString<256> FullFS("+promote-alloca,+load-store-opt,+enable-ds128,+sram-ecc,+xnack,");
 
   if (isAmdHsaOS()) // Turn on FlatForGlobal for HSA.
-    FullFS += "+flat-for-global,+unaligned-buffer-access,+trap-handler,";
+    FullFS += "+flat-for-global,+unaligned-access-mode,+trap-handler,";
 
   FullFS += "+enable-prt-strict-null,"; // This is overridden by a disable in FS
 
@@ -194,7 +194,6 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     FlatForGlobal(false),
     AutoWaitcntBeforeBarrier(false),
     UnalignedScratchAccess(false),
-    UnalignedBufferAccess(false),
     UnalignedAccessMode(false),
 
     HasApertureRegs(false),
@@ -266,6 +265,7 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasUnpackedD16VMem(false),
     LDSMisalignedBug(false),
     HasMFMAInlineLiteralBug(false),
+    UnalignedBufferAccess(false),
     UnalignedDSAccess(false),
 
     ScalarizeGlobal(false),
@@ -823,7 +823,7 @@ struct FillMFMAShadowMutation : ScheduleDAGMutation {
     for (unsigned I = 0; I < Succs.size(); ++I) {
       for (const SDep &SI : Succs[I]->Succs) {
         const SUnit *SU = SI.getSUnit();
-        if (SU != Succs[I] && llvm::find(Succs, SU) == Succs.end())
+        if (SU != Succs[I] && !llvm::is_contained(Succs, SU))
           Succs.push_back(SU);
       }
     }
@@ -831,7 +831,7 @@ struct FillMFMAShadowMutation : ScheduleDAGMutation {
     SmallPtrSet<const SUnit*, 32> Visited;
     while (!Preds.empty()) {
       const SUnit *SU = Preds.pop_back_val();
-      if (llvm::find(Succs, SU) != Succs.end())
+      if (llvm::is_contained(Succs, SU))
         return false;
       Visited.insert(SU);
       for (const SDep &SI : SU->Preds)

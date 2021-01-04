@@ -107,6 +107,11 @@ static cl::opt<std::string> PipelineStartEPPipeline(
     cl::desc("A textual description of the module pass pipeline inserted at "
              "the PipelineStart extension point into default pipelines"),
     cl::Hidden);
+static cl::opt<std::string> PipelineEarlySimplificationEPPipeline(
+    "passes-ep-pipeline-early-simplification",
+    cl::desc("A textual description of the module pass pipeline inserted at "
+             "the EarlySimplification extension point into default pipelines"),
+    cl::Hidden);
 static cl::opt<std::string> OptimizerLastEPPipeline(
     "passes-ep-optimizer-last",
     cl::desc("A textual description of the module pass pipeline inserted at "
@@ -190,10 +195,18 @@ static void registerEPCallbacks(PassBuilder &PB) {
           Err(PB.parsePassPipeline(PM, VectorizerStartEPPipeline));
         });
   if (tryParsePipelineText<ModulePassManager>(PB, PipelineStartEPPipeline))
-    PB.registerPipelineStartEPCallback([&PB](ModulePassManager &PM) {
-      ExitOnError Err("Unable to parse PipelineStartEP pipeline: ");
-      Err(PB.parsePassPipeline(PM, PipelineStartEPPipeline));
-    });
+    PB.registerPipelineStartEPCallback(
+        [&PB](ModulePassManager &PM, PassBuilder::OptimizationLevel) {
+          ExitOnError Err("Unable to parse PipelineStartEP pipeline: ");
+          Err(PB.parsePassPipeline(PM, PipelineStartEPPipeline));
+        });
+  if (tryParsePipelineText<ModulePassManager>(
+          PB, PipelineEarlySimplificationEPPipeline))
+    PB.registerPipelineEarlySimplificationEPCallback(
+        [&PB](ModulePassManager &PM, PassBuilder::OptimizationLevel) {
+          ExitOnError Err("Unable to parse EarlySimplification pipeline: ");
+          Err(PB.parsePassPipeline(PM, PipelineEarlySimplificationEPPipeline));
+        });
   if (tryParsePipelineText<FunctionPassManager>(PB, OptimizerLastEPPipeline))
     PB.registerOptimizerLastEPCallback(
         [&PB](ModulePassManager &PM, PassBuilder::OptimizationLevel) {
@@ -332,16 +345,7 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
       return false;
     }
   }
-  // For compatibility with legacy pass manager.
-  // Alias analyses are not specially specified when using the legacy PM.
-  for (auto PassName : Passes) {
-    if (PB.isAAPassName(PassName)) {
-      if (auto Err = PB.parseAAPipeline(AA, PassName)) {
-        errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
-        return false;
-      }
-    }
-  }
+
   // For compatibility with the legacy PM AA pipeline.
   // AAResultsWrapperPass by default provides basic-aa in the legacy PM
   // unless -disable-basic-aa is specified.
@@ -351,6 +355,17 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
     if (auto Err = PB.parseAAPipeline(AA, "basic-aa")) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
+    }
+  }
+
+  // For compatibility with legacy pass manager.
+  // Alias analyses are not specially specified when using the legacy PM.
+  for (auto PassName : Passes) {
+    if (PB.isAAPassName(PassName)) {
+      if (auto Err = PB.parseAAPipeline(AA, PassName)) {
+        errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
+        return false;
+      }
     }
   }
 

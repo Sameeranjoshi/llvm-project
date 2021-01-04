@@ -38,14 +38,15 @@ class StrFunc<string r> {
   string result = r;
 }
 
+// TODO: Use !interleave() directly rather than through StrJoin/StrJoinInt.
+
 // Concatenates a list of strings with a separator (default ", ")
 class StrJoin<list<string> strings, string sep = ", "> :
-    StrFunc<!if(!empty(strings), "",
-         !foldl(!head(strings), !tail(strings), prev, cur, prev # sep # cur))>;
+    StrFunc<!interleave(strings, sep)>;
 
 // Concatenates a list of integers into a string with a separator (default ", ")
 class StrJoinInt<list<int> integers, string sep = ", "> :
-    StrJoin<!foreach(i, integers, !cast<string>(i)), sep>;
+    StrFunc<!interleave(integers, sep)>;
 
 //===----------------------------------------------------------------------===//
 // Predicate definitions
@@ -474,8 +475,9 @@ def AnyComplex : Type<CPred<"$_self.isa<::mlir::ComplexType>()">,
 class OpaqueType<string dialect, string name, string description>
   : Type<CPred<"isOpaqueTypeWithName($_self, \""#dialect#"\", \""#name#"\")">,
          description>,
-    BuildableType<"::mlir::OpaqueType::get($_builder.getIdentifier(\""
-                  # dialect # "\"), \"" # name # "\", $_builder.getContext())">;
+    BuildableType<"::mlir::OpaqueType::get($_builder.getContext(), "
+                  "$_builder.getIdentifier(\"" # dialect # "\"), \""
+                  # name # "\")">;
 
 // Function Type
 
@@ -670,6 +672,11 @@ class AnyStridedMemRefOfRank<int rank> :
   Type<And<[AnyStridedMemRef.predicate,
             MemRefRankOf<[AnyType], [rank]>.predicate]>,
        AnyStridedMemRef.description # " of rank " # rank>;
+
+class StridedMemRefRankOf<list<Type> allowedTypes, list<int> ranks> :
+    Type<And<[MemRefOf<allowedTypes>.predicate, HasAnyRankOfPred<ranks>]>,
+         StrJoin<!foreach(rank, ranks, rank # "D"), "/">.result # " " #
+         MemRefOf<allowedTypes>.description>;
 
 // This represents a generic tuple without any constraints on element type.
 def AnyTuple : Type<IsTupleTypePred, "tuple">;
@@ -1585,8 +1592,7 @@ class Confined<Attr attr, list<AttrConstraint> constraints> : Attr<
 class AllAttrConstraintsOf<list<AttrConstraint> constraints> : AttrConstraint<
     And<!listconcat([!head(constraints).predicate],
                       !foreach(pred, !tail(constraints), pred.predicate))>,
-    !foldl(/*init*/!head(constraints).description, /*list*/!tail(constraints),
-           prev, cur, prev # " and " # cur.description)> {
+    !interleave(!foreach(con, constraints, con.description), " and ")> {
 }
 
 class IntMinValue<int n> : AttrConstraint<
@@ -1750,6 +1756,9 @@ def Terminator : NativeOpTrait<"IsTerminator">;
 // Op can be safely normalized in the presence of MemRefs with
 // non-identity maps.
 def MemRefsNormalizable : NativeOpTrait<"MemRefsNormalizable">;
+// Op can be systematically interconverted between scalar and vector/tensor
+// form by mapping elementwise based on the type.
+def ElementwiseMappable : NativeOpTrait<"ElementwiseMappable">;
 
 // Op's regions have a single block with the specified terminator.
 class SingleBlockImplicitTerminator<string op>
@@ -1930,15 +1939,6 @@ def region;
 // Marker used to identify the successor list for an op.
 def successor;
 
-// Base class for custom builders. This is a transient class that will go away
-// when the transition to the DAG form of builder declaration is complete.
-// Should not be used directly.
-class OpBuilderBase<dag dp, code b> {
-  string params = ?;
-  dag dagParams = dp;
-  code body = b;
-}
-
 // Class for defining a custom builder.
 //
 // TableGen generates several generic builders for each op by default (see
@@ -1977,11 +1977,9 @@ class OpBuilderBase<dag dp, code b> {
 // If an empty string is passed in for `body`, then *only* the builder
 // declaration will be generated; this provides a way to define complicated
 // builders entirely in C++.
-class OpBuilderDAG<dag p, code b = ""> : OpBuilderBase<p, b>;
-
-// Deprecated version of OpBuilder that takes the builder signature as string.
-class OpBuilder<string p, code b = ""> : OpBuilderBase<(ins), b> {
-  let params = p;
+class OpBuilderDAG<dag p, code b = ""> {
+  dag dagParams = p;
+  code body = b;
 }
 
 // A base decorator class that may optionally be added to OpVariables.
@@ -2059,7 +2057,7 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
   //                   ValueRange operands,
   //                   ArrayRef<NamedAttribute> attributes);
   // ```
-  list<OpBuilderBase> builders = ?;
+  list<OpBuilderDAG> builders = ?;
 
   // Avoid generating default build functions.  Custom builders must be
   // provided.
@@ -2412,15 +2410,18 @@ def replaceWithValue;
 // Data type generation
 //===----------------------------------------------------------------------===//
 
-// Define a new type belonging to a dialect and called 'name'.
-class TypeDef<Dialect owningdialect, string name> {
-  Dialect dialect = owningdialect;
+// Define a new type, named `name`, belonging to `dialect` that inherits from
+// the given C++ base class.
+class TypeDef<Dialect dialect, string name,
+              string baseCppClass = "::mlir::Type">
+    : DialectType<dialect, CPred<"">> {
+  // The name of the C++ Type class.
   string cppClassName = name # "Type";
+  // The name of the C++ base class to use for this Type.
+  string cppBaseClassName = baseCppClass;
 
   // Short summary of the type.
   string summary = ?;
-  // The longer description of this type.
-  string description = ?;
 
   // Name of storage class to generate or use.
   string storageClass = name # "TypeStorage";
@@ -2474,6 +2475,15 @@ class TypeDef<Dialect owningdialect, string name> {
   bit genVerifyInvariantsDecl = 0;
   // Extra code to include in the class declaration.
   code extraClassDeclaration = [{}];
+
+  // The predicate for when this type is used as a type constraint.
+  let predicate = CPred<"$_self.isa<" # dialect.cppNamespace #
+                                 "::" # cppClassName # ">()">;
+  // A constant builder provided when the type has no parameters.
+  let builderCall = !if(!empty(parameters),
+                           "$_builder.getType<" # dialect.cppNamespace #
+                               "::" # cppClassName # ">()",
+                           "");
 }
 
 // 'Parameters' should be subclasses of this or simple strings (which is a

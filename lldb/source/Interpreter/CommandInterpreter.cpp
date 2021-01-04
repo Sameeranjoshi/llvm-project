@@ -224,8 +224,7 @@ bool CommandInterpreter::GetSpaceReplPrompts() const {
 }
 
 void CommandInterpreter::Initialize() {
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
+  LLDB_SCOPED_TIMER();
 
   CommandReturnObject result(m_debugger.GetUseColor());
 
@@ -487,8 +486,7 @@ const char *CommandInterpreter::ProcessEmbeddedScriptCommands(const char *arg) {
   m_command_dict[NAME] = std::make_shared<CLASS>(*this);
 
 void CommandInterpreter::LoadCommandDictionary() {
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
+  LLDB_SCOPED_TIMER();
 
   REGISTER_COMMAND_OBJECT("apropos", CommandObjectApropos);
   REGISTER_COMMAND_OBJECT("breakpoint", CommandObjectMultiwordBreakpoint);
@@ -1523,16 +1521,12 @@ Status CommandInterpreter::PreprocessCommand(std::string &command) {
                          end_backtick - expr_content_start);
 
     ExecutionContext exe_ctx(GetExecutionContext());
-    Target *target = exe_ctx.GetTargetPtr();
 
     // Get a dummy target to allow for calculator mode while processing
     // backticks. This also helps break the infinite loop caused when target is
     // null.
-    if (!target)
-      target = m_debugger.GetDummyTarget();
-
-    if (!target)
-      continue;
+    Target *exe_target = exe_ctx.GetTargetPtr();
+    Target &target = exe_target ? *exe_target : m_debugger.GetDummyTarget();
 
     ValueObjectSP expr_result_valobj_sp;
 
@@ -1545,8 +1539,8 @@ Status CommandInterpreter::PreprocessCommand(std::string &command) {
     options.SetTimeout(llvm::None);
 
     ExpressionResults expr_result =
-        target->EvaluateExpression(expr_str.c_str(), exe_ctx.GetFramePtr(),
-                                   expr_result_valobj_sp, options);
+        target.EvaluateExpression(expr_str.c_str(), exe_ctx.GetFramePtr(),
+                                  expr_result_valobj_sp, options);
 
     if (expr_result == eExpressionCompleted) {
       Scalar scalar;
@@ -1653,9 +1647,7 @@ bool CommandInterpreter::HandleCommand(const char *command_line,
                                    command_line);
 
   LLDB_LOGF(log, "Processing command: %s", command_line);
-
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, "Handling command: %s.", command_line);
+  LLDB_SCOPED_TIMERF("Processing command: %s.", command_line);
 
   if (!no_context_switching)
     UpdateExecutionContext(override_context);

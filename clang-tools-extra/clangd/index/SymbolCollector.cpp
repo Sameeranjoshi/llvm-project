@@ -15,6 +15,7 @@
 #include "SourceCode.h"
 #include "SymbolLocation.h"
 #include "URI.h"
+#include "index/Relation.h"
 #include "index/SymbolID.h"
 #include "support/Logger.h"
 #include "clang/AST/Decl.h"
@@ -187,9 +188,12 @@ RefKind toRefKind(index::SymbolRoleSet Roles, bool Spelled = false) {
   return Result;
 }
 
-bool shouldIndexRelation(const index::SymbolRelation &R) {
-  // We currently only index BaseOf relations, for type hierarchy subtypes.
-  return R.Roles & static_cast<unsigned>(index::SymbolRole::RelationBaseOf);
+llvm::Optional<RelationKind> indexableRelation(const index::SymbolRelation &R) {
+  if (R.Roles & static_cast<unsigned>(index::SymbolRole::RelationBaseOf))
+    return RelationKind::BaseOf;
+  if (R.Roles & static_cast<unsigned>(index::SymbolRole::RelationOverrideOf))
+    return RelationKind::OverriddenBy;
+  return None;
 }
 
 } // namespace
@@ -344,7 +348,8 @@ bool SymbolCollector::handleDeclOccurrence(
       !isa<NamespaceDecl>(ND) &&
       (Opts.RefsInHeaders ||
        SM.getFileID(SM.getFileLoc(Loc)) == SM.getMainFileID()))
-    DeclRefs[ND].emplace_back(SM.getFileLoc(Loc), Roles);
+    DeclRefs[ND].push_back(
+        SymbolRef{SM.getFileLoc(Loc), Roles, ASTNode.Parent});
   // Don't continue indexing if this is a mere reference.
   if (IsOnlyRef)
     return true;
@@ -422,7 +427,8 @@ bool SymbolCollector::handleMacroOccurrence(const IdentifierInfo *Name,
   // Do not store references to main-file macros.
   if ((static_cast<unsigned>(Opts.RefFilter) & Roles) && !IsMainFileOnly &&
       (Opts.RefsInHeaders || SM.getFileID(SpellingLoc) == SM.getMainFileID()))
-    MacroRefs[ID].push_back({Loc, Roles});
+    // FIXME: Populate container information for macro references.
+    MacroRefs[ID].push_back({Loc, Roles, /*Container=*/nullptr});
 
   // Collect symbols.
   if (!Opts.CollectMacro)
@@ -484,14 +490,10 @@ bool SymbolCollector::handleMacroOccurrence(const IdentifierInfo *Name,
 void SymbolCollector::processRelations(
     const NamedDecl &ND, const SymbolID &ID,
     ArrayRef<index::SymbolRelation> Relations) {
-  // Store subtype relations.
-  if (!dyn_cast<TagDecl>(&ND))
-    return;
-
   for (const auto &R : Relations) {
-    if (!shouldIndexRelation(R))
+    auto RKind = indexableRelation(R);
+    if (!RKind)
       continue;
-
     const Decl *Object = R.RelatedSymbol;
 
     auto ObjectID = getSymbolID(Object);
@@ -507,7 +509,10 @@ void SymbolCollector::processRelations(
     //       in the index and find nothing, but that's a situation they
     //       probably need to handle for other reasons anyways.
     // We currently do (B) because it's simpler.
-    this->Relations.insert(Relation{ID, RelationKind::BaseOf, ObjectID});
+    if (*RKind == RelationKind::BaseOf)
+      this->Relations.insert({ID, *RKind, ObjectID});
+    else if (*RKind == RelationKind::OverriddenBy)
+      this->Relations.insert({ObjectID, *RKind, ID});
   }
 }
 
@@ -579,24 +584,22 @@ void SymbolCollector::finish() {
     }
     return Found->second;
   };
-  auto CollectRef =
-      [&](SymbolID ID,
-          const std::pair<SourceLocation, index::SymbolRoleSet> &LocAndRole,
-          bool Spelled = false) {
-        auto FileID = SM.getFileID(LocAndRole.first);
-        // FIXME: use the result to filter out references.
-        shouldIndexFile(FileID);
-        if (auto FileURI = GetURI(FileID)) {
-          auto Range =
-              getTokenRange(LocAndRole.first, SM, ASTCtx->getLangOpts());
-          Ref R;
-          R.Location.Start = Range.first;
-          R.Location.End = Range.second;
-          R.Location.FileURI = FileURI->c_str();
-          R.Kind = toRefKind(LocAndRole.second, Spelled);
-          Refs.insert(ID, R);
-        }
-      };
+  auto CollectRef = [&](SymbolID ID, const SymbolRef &LocAndRole,
+                        bool Spelled = false) {
+    auto FileID = SM.getFileID(LocAndRole.Loc);
+    // FIXME: use the result to filter out references.
+    shouldIndexFile(FileID);
+    if (auto FileURI = GetURI(FileID)) {
+      auto Range = getTokenRange(LocAndRole.Loc, SM, ASTCtx->getLangOpts());
+      Ref R;
+      R.Location.Start = Range.first;
+      R.Location.End = Range.second;
+      R.Location.FileURI = FileURI->c_str();
+      R.Kind = toRefKind(LocAndRole.Roles, Spelled);
+      R.Container = getSymbolID(LocAndRole.Container);
+      Refs.insert(ID, R);
+    }
+  };
   // Populate Refs slab from MacroRefs.
   // FIXME: All MacroRefs are marked as Spelled now, but this should be checked.
   for (const auto &IDAndRefs : MacroRefs)
@@ -607,7 +610,7 @@ void SymbolCollector::finish() {
   for (auto &DeclAndRef : DeclRefs) {
     if (auto ID = getSymbolID(DeclAndRef.first)) {
       for (auto &LocAndRole : DeclAndRef.second) {
-        const auto FileID = SM.getFileID(LocAndRole.first);
+        const auto FileID = SM.getFileID(LocAndRole.Loc);
         // FIXME: It's better to use TokenBuffer by passing spelled tokens from
         // the caller of SymbolCollector.
         if (!FilesToTokensCache.count(FileID))
@@ -617,7 +620,7 @@ void SymbolCollector::finish() {
         // Check if the referenced symbol is spelled exactly the same way the
         // corresponding NamedDecl is. If it is, mark this reference as spelled.
         const auto *IdentifierToken =
-            spelledIdentifierTouching(LocAndRole.first, Tokens);
+            spelledIdentifierTouching(LocAndRole.Loc, Tokens);
         DeclarationName Name = DeclAndRef.first->getDeclName();
         const auto NameKind = Name.getNameKind();
         bool IsTargetKind = NameKind == DeclarationName::Identifier ||

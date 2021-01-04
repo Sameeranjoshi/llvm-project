@@ -1,3 +1,4 @@
+add_subdirectory(Bindings)
 add_subdirectory(CAPI)
 add_subdirectory(EDSC)
 add_subdirectory(mlir-cpu-runner)
@@ -43,6 +44,7 @@ set(MLIR_TEST_DEPENDS
   FileCheck count not
   MLIRUnitTests
   mlir-capi-ir-test
+  mlir-capi-pass-test
   mlir-cpu-runner
   mlir-edsc-builder-api-test
   mlir-linalg-ods-gen
@@ -99,6 +101,8 @@ endif()
 if(MLIR_BINDINGS_PYTHON_ENABLED)
   list(APPEND MLIR_TEST_DEPENDS
     MLIRBindingsPythonExtension
+    MLIRBindingsPythonTestOps
+    MLIRTransformsBindingsPythonExtension
   )
 endif()
 

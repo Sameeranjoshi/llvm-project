@@ -34,6 +34,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/IR/PrintPasses.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -536,6 +537,22 @@ void Loop::setLoopAlreadyUnrolled() {
   MDNode *LoopID = getLoopID();
   MDNode *NewLoopID = makePostTransformationMetadata(
       Context, LoopID, {"llvm.loop.unroll."}, {DisableUnrollMD});
+  setLoopID(NewLoopID);
+}
+
+void Loop::setLoopMustProgress() {
+  LLVMContext &Context = getHeader()->getContext();
+
+  MDNode *MustProgress = findOptionMDForLoop(this, "llvm.loop.mustprogress");
+
+  if (MustProgress)
+    return;
+
+  MDNode *MustProgressMD =
+      MDNode::get(Context, MDString::get(Context, "llvm.loop.mustprogress"));
+  MDNode *LoopID = getLoopID();
+  MDNode *NewLoopID =
+      makePostTransformationMetadata(Context, LoopID, {}, {MustProgressMD});
   setLoopID(NewLoopID);
 }
 
