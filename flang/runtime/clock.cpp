@@ -57,6 +57,40 @@ void RTNAME(DateAndTime)(char *date, char *time, char *zone,
     copyBufferAndPad(zone, zoneChars, len);
   }
 }
+
+long long RTNAME(SystemClockCount)(){
+  timeval t;
+  ::gettimeofday(&t, nullptr);
+  time_t timer{t.tv_sec};
+  tm localTime;
+  ::localtime_r(&timer, &localTime);
+
+  // 24 hours * 60 minutes * 60 seconds
+  const int maxDayTime{86400};
+  const int clockResolution{1000};
+  auto timePointInADay{ localTime.tm_hour*3600 + localTime.tm_min*60 + localTime.tm_sec };
+    // trip back to 0 if the value overflows of count_max.
+    long long count =
+        (timePointInADay > maxDayTime) ? 0 : (timePointInADay * clockResolution);
+    return count;
+}
+
+long long RTNAME(SystemClockRate)(){
+   constexpr long long clockResolution{1000};
+   constexpr long long count_rate = clockResolution;
+  return count_rate;
+}
+
+long long RTNAME(SystemClockMax)(){
+  // 24 hours * 60 minutes * 60 *seconds
+  constexpr int maxDayTime{86400};
+  constexpr int clockResolution{1000};
+  return maxDayTime * clockResolution;
+}
+
+void RTNAME(SystemClock)(int *count, int *count_rate, int *count_max) {
+}
+
 } // namespace Fortran::runtime
 
 #else /* Windows */

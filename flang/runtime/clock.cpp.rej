@@ -1,0 +1,10 @@
+--- runtime/clock.cpp
++++ runtime/clock.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include "clock.h"
+ #include <algorithm>
++#include <chrono>
+ #include <cstdlib>
+ #include <cstring>
+ #include <stdio.h>
